@@ -1,132 +1,212 @@
-import sqlite3
 import tkinter as tk
-from tkinter import messagebox
+from itertools import cycle
+from tkinter import font, simpledialog, messagebox
+from typing import NamedTuple
 
-# Database and Table Creation
-def buat_database():
-    conn = sqlite3.connect('address_book.db')
-    cursor = conn.cursor()
+class Player(NamedTuple):
+    label: str
+    color: str
 
-    # Buat tabel
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS contacts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nama TEXT NOT NULL,
-        alamat TEXT NOT NULL,
-        no_telp TEXT NOT NULL,
-        email TEXT NOT NULL
-    )
-    ''')
-    
-    conn.commit()
-    conn.close()
+class Move(NamedTuple):
+    row: int
+    col: int
+    label: str = ""
 
-# CRUD Operations
-def insert_contacts(nama, alamat, no_telp, email):
-    conn = sqlite3.connect('address_book.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-    INSERT INTO contacts (nama, alamat, no_telp, email)
-    VALUES (?, ?, ?, ?)
-    ''', (nama, alamat, no_telp, email))
-    
-    conn.commit()
-    conn.close()
+DEFAULT_PLAYERS = (
+    Player(label="X", color="blue"),
+    Player(label="O", color="green"),
+)
 
-def retrieve_contacts():
-    conn = sqlite3.connect('address_book.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM contacts')
-    rows = cursor.fetchall()
-    
-    conn.close()
-    return rows
+class TicTacToeGame:
+    def __init__(self, players=DEFAULT_PLAYERS, board_size=3, win_condition=3):
+        self._players = cycle(players)
+        self.board_size = board_size
+        self.win_condition = win_condition
+        self.current_player = next(self._players)
+        self.winner_combo = []
+        self._current_moves = []
+        self._has_winner = False
+        self._winning_combos = []
+        self._setup_board()
 
-def update_contact(id, nama, alamat, no_telp, email):
-    conn = sqlite3.connect('address_book.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-    UPDATE contacts
-    SET nama = ?, alamat = ?, no_telp = ?, email = ?
-    WHERE id = ?
-    ''', (nama, alamat, no_telp, email, id))
-    
-    conn.commit()
-    conn.close()
+    def _setup_board(self):
+        self._current_moves = [
+            [Move(row, col) for col in range(self.board_size)]
+            for row in range(self.board_size)
+        ]
+        self._winning_combos = self._get_winning_combos()
 
-def delete_contact(id):
-    conn = sqlite3.connect('address_book.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('DELETE FROM contacts WHERE id = ?', (id,))
-    
-    conn.commit()
-    conn.close()
+    def _get_winning_combos(self):
+        combos = []
 
-# GUI Functions
-def insert_contacts_gui(nama, alamat, no_telp, email):
-    insert_contacts(nama, alamat, no_telp, email)
-    refresh_contacts_list()
+        # Rows and columns
+        for row in range(self.board_size):
+            for col in range(self.board_size - self.win_condition + 1):
+                combos.append([(row, col + i) for i in range(self.win_condition)])
+                combos.append([(col + i, row) for i in range(self.win_condition)])
 
-def refresh_contacts_list():
-    contacts_list.delete(0, tk.END)
-    for row in retrieve_contacts():
-        contacts_list.insert(tk.END, row)
+        # Diagonals
+        for row in range(self.board_size - self.win_condition + 1):
+            for col in range(self.board_size - self.win_condition + 1):
+                combos.append([(row + i, col + i) for i in range(self.win_condition)])
+                combos.append([(row + i, col + self.win_condition - 1 - i) for i in range(self.win_condition)])
 
-def on_add():
-    insert_contacts_gui(entry_nama.get(), entry_alamat.get(), entry_no_telp.get(), entry_email.get())
-    entry_nama.delete(0, tk.END)
-    entry_alamat.delete(0, tk.END)
-    entry_no_telp.delete(0, tk.END)
-    entry_email.delete(0, tk.END)
+        return combos
 
-def on_update():
-    selected = contacts_list.curselection()
-    if selected:
-        contact_id = contacts_list.get(selected[0])[0]
-        update_contact(contact_id, entry_nama.get(), entry_alamat.get(), entry_no_telp.get(), entry_email.get())
-        refresh_contacts_list()
+    def is_valid_move(self, move):
+        """Return True if move is valid, and False otherwise."""
+        row, col = move.row, move.col
+        move_was_not_played = self._current_moves[row][col].label == ""
+        no_winner = not self._has_winner
+        return no_winner and move_was_not_played
 
-def on_delete():
-    selected = contacts_list.curselection()
-    if selected:
-        contact_id = contacts_list.get(selected[0])[0]
-        delete_contact(contact_id)
-        refresh_contacts_list()
+    def process_move(self, move):
+        """Process the current move and check if it's a win."""
+        row, col = move.row, move.col
+        self._current_moves[row][col] = move
+        for combo in self._winning_combos:
+            results = set(self._current_moves[n][m].label for n, m in combo)
+            is_win = (len(results) == 1) and ("" not in results)
+            if is_win:
+                self._has_winner = True
+                self.winner_combo = combo
+                break
 
-# Main Application
-buat_database()
+    def has_winner(self):
+        """Return True if the game has a winner, and False otherwise."""
+        return self._has_winner
 
-root = tk.Tk()
-root.title("Address Book")
+    def is_tied(self):
+        """Return True if the game is tied, and False otherwise."""
+        no_winner = not self._has_winner
+        played_moves = (
+            move.label for row in self._current_moves for move in row
+        )
+        return no_winner and all(played_moves)
 
-# Form Input
-tk.Label(root, text="Nama").grid(row=0, column=0)
-tk.Label(root, text="Alamat").grid(row=1, column=0)
-tk.Label(root, text="No Telp").grid(row=2, column=0)
-tk.Label(root, text="Email").grid(row=3, column=0)
+    def toggle_player(self):
+        """Return a toggled player."""
+        self.current_player = next(self._players)
 
-entry_nama = tk.Entry(root)
-entry_alamat = tk.Entry(root)
-entry_no_telp = tk.Entry(root)
-entry_email = tk.Entry(root)
+    def reset_game(self):
+        """Reset the game state to play again."""
+        for row, row_content in enumerate(self._current_moves):
+            for col, _ in enumerate(row_content):
+                row_content[col] = Move(row, col)
+        self._has_winner = False
+        self.winner_combo = []
 
-entry_nama.grid(row=0, column=1)
-entry_alamat.grid(row=1, column=1)
-entry_no_telp.grid(row=2, column=1)
-entry_email.grid(row=3, column=1)
+class TicTacToeBoard(tk.Tk):
+    def __init__(self, game):
+        super().__init__()
+        self.title("Tic-Tac-Toe Game")
+        self._cells = {}
+        self._game = game
+        self._create_menu()
+        self._create_board_display()
+        self._create_board_grid()
 
-# Buttons
-tk.Button(root, text="Add", command=on_add).grid(row=4, column=0)
-tk.Button(root, text="Update", command=on_update).grid(row=4, column=1)
-tk.Button(root, text="Delete", command=on_delete).grid(row=4, column=2)
+    def _create_menu(self):
+        menu_bar = tk.Menu(master=self)
+        self.config(menu=menu_bar)
+        file_menu = tk.Menu(master=menu_bar)
+        file_menu.add_command(label="Play Again", command=self.reset_board)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=quit)
+        menu_bar.add_cascade(label="File", menu=file_menu)
 
-# Contacts List
-contacts_list = tk.Listbox(root)
-contacts_list.grid(row=5, column=0, columnspan=3, sticky="nsew")
-refresh_contacts_list()
+    def _create_board_display(self):
+        display_frame = tk.Frame(master=self)
+        display_frame.pack(fill=tk.X)
+        self.display = tk.Label(
+            master=display_frame,
+            text="Ready?",
+            font=font.Font(size=28, weight="bold"),
+        )
+        self.display.pack()
 
-root.mainloop()
+    def _create_board_grid(self):
+        grid_frame = tk.Frame(master=self)
+        grid_frame.pack()
+        for row in range(self._game.board_size):
+            self.rowconfigure(row, weight=1, minsize=50)
+            self.columnconfigure(row, weight=1, minsize=75)
+            for col in range(self._game.board_size):
+                button = tk.Button(
+                    master=grid_frame,
+                    text="",
+                    font=font.Font(size=36, weight="bold"),
+                    fg="black",
+                    width=3,
+                    height=2,
+                    highlightbackground="lightblue",
+                )
+                self._cells[button] = (row, col)
+                button.bind("<ButtonPress-1>", self.play)
+                button.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
+
+    def play(self, event):
+        """Handle a player's move."""
+        clicked_btn = event.widget
+        row, col = self._cells[clicked_btn]
+        move = Move(row, col, self._game.current_player.label)
+        if self._game.is_valid_move(move):
+            self._update_button(clicked_btn)
+            self._game.process_move(move)
+            if self._game.is_tied():
+                self._update_display(msg="Tied game!", color="red")
+            elif self._game.has_winner():
+                self._highlight_cells()
+                msg = f'Player "{self._game.current_player.label}" won!'
+                color = self._game.current_player.color
+                self._update_display(msg, color)
+            else:
+                self._game.toggle_player()
+                msg = f"{self._game.current_player.label}'s turn"
+                self._update_display(msg)
+
+    def _update_button(self, clicked_btn):
+        clicked_btn.config(text=self._game.current_player.label)
+        clicked_btn.config(fg=self._game.current_player.color)
+
+    def _update_display(self, msg, color="black"):
+        self.display["text"] = msg
+        self.display["fg"] = color
+
+    def _highlight_cells(self):
+        for button, coordinates in self._cells.items():
+            if coordinates in self._game.winner_combo:
+                button.config(highlightbackground="red")
+
+    def reset_board(self):
+        """Reset the game's board to play again."""
+        self._game.reset_game()
+        self._update_display(msg="Ready?")
+        for button in self._cells.keys():
+            button.config(highlightbackground="lightblue")
+            button.config(text="")
+            button.config(fg="black")
+
+def get_integer_input(prompt):
+    while True:
+        try:
+            value = simpledialog.askinteger("Input", prompt)
+            if value is None:
+                raise ValueError("Input cancelled")
+            return value
+        except (ValueError, TypeError):
+            messagebox.showerror("Invalid input", "Please enter a valid integer.")
+
+def main():
+    root = tk.Tk()
+    root.withdraw()  # Hide the root window
+
+    board_size = get_integer_input("Please input a number for board size:")
+    win_condition = get_integer_input("Please input the number of symbols required to win:")
+
+    game = TicTacToeGame(board_size=board_size, win_condition=win_condition)
+    board = TicTacToeBoard(game)
+    board.mainloop()
+
+if __name__ == "__main__":
+    main()
